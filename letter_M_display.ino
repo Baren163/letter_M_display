@@ -51,9 +51,9 @@ volatile bool BTN_B_pressed = 0;
 volatile bool POT_delay_flag = 0;
 
 uint8_t mode = 0;
-uint16_t LED_STATES = 0;  // 13 bit register to hold the boolean states of each of the LEDs
-uint8_t mode_0_LED_gap = 13;
-uint8_t mode_0_counter = 13;
+uint16_t LED_STATES = 3;  // 13 bit register to hold the boolean states of each of the LEDs
+uint8_t mode_0_LED_gap = 2;
+uint8_t mode_0_counter = 2;
 
 
 // ISR(TIM0_COMPA_vect) {
@@ -72,11 +72,13 @@ void pulse_pin(uint8_t pin) {
       PORTA |= (1 << CLK);
       __asm__("nop");
       PORTA &= ~(1 << CLK);
+      PORTA ^= (1 << BTNB);
       break;
     case (LE):
       PORTA |= (1 << LE);
       __asm__("nop");
       PORTA &= ~(1 << LE);
+      
       break;
     case (OE):
       break;
@@ -90,15 +92,18 @@ void pulse_pin(uint8_t pin) {
 void init_GPIO() {
   // Set inputs and outputs
   DDRA |= (1 << SDI) | (1 << CLK) | (1 << LE) | (1 << OE);
-  DDRA &= ~(1 << BTNB) & ~(1 << DDA6);
-  DDRB &= ~(1 << BTNA);
+  // DDRA &= ~(1 << BTNB) & ~(1 << DDA6);
+  // DDRB &= ~(1 << BTNA);
+  DDRA |= (1 << BTNB);  // For debugging I will use BTNB pin as output pin
 
   // Enable pull-up resistors for push buttons
-  PORTA |= (1 << BTNB);
-  PORTB |= (1 << BTNA);
+  // PORTA |= (1 << BTNB);
+  // PORTB |= (1 << BTNA);
 
   // Set OE initial state to LOW
   PORTA &= ~(1 << OE);
+
+  PORTA |= (1 << BTNB);
 }
 
 
@@ -136,26 +141,45 @@ void init_timer1() {
   // CTC mode, prescaler 256
   TCCR1B = (1 << WGM12) | (1 << CS12);
 
-  // Output compare 3096 is 1 second
-  OCR1AH = (3905 >> 8);
-  OCR1AL = (uint8_t)3905;
+  // Output compare 3905 is 1 second
+  OCR1AH = (600 >> 8);
+  OCR1AL = (uint8_t)600;
 
   TIMSK1 = (1 << OCIE1A);
 }
 
 
 void update_LEDs() {
-  // Can we represent LED_STATES as an array of bytes to save RAM and minimize clock cycles?
-  for (int8_t i = 12; i >= 0; i--) {
-    if (((LED_STATES >> i) & 1)) {
+  // // Can we represent LED_STATES as an array of bytes to save RAM and minimize clock cycles?
+  // for (int8_t i = 12; i >= 0; i--) {
+  //   if (((LED_STATES >> i) & 1)) {
+  //     PORTA |= (1 << SDI);
+  //   } else {
+  //     PORTA &= ~(1 << SDI);
+  //   }
+  //   pulse_pin(CLK);
+  // }
+  // pulse_pin(LE);
+  // return;
+
+  uint16_t temp_states = LED_STATES;
+
+  // Loop exactly 13 times (from bit index 12 down to 0)
+  for (uint8_t i = 0; i < 13; i++) {
+    // Always check the highest bit of interest (Bit 12)
+    if (temp_states & (1 << 12)) {
       PORTA |= (1 << SDI);
     } else {
       PORTA &= ~(1 << SDI);
     }
+    
     pulse_pin(CLK);
+    
+    // Shift left so the next bit moves into the Bit 12 position
+    temp_states <<= 1; 
   }
+  
   pulse_pin(LE);
-  return;
 }
 
 
@@ -211,6 +235,8 @@ int main() {
           mode_0_counter = mode_0_LED_gap;
           LED_STATES |= (1 << 12);
         }
+
+        update_LEDs();
 
         // Delay for a certain amount of time (delay duration based on potentiometer)
         // For this delay we will use 16-bit timer 1
