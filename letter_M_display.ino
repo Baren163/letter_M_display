@@ -7,6 +7,7 @@
 
 #include <stdbool.h>
 #include <avr/io.h> // The preprocessor will automatically detect your target chip and load the specific definitions for the ATtiny84   <-- How??
+#include <avr/interrupt.h>  // What does this library provide ??
 
 #define SDI 0
 #define CLK 1
@@ -51,6 +52,12 @@ volatile bool BTN_B_pressed = 0;
 uint8_t mode = 0;
 uint16_t LED_STATES = 0;  // 13 bit register to hold the boolean states of each of the LEDs
 uint8_t mode_0_1_LED_count = 1; // Variable
+
+
+ISR(TIM0_COMPA_vect)
+{
+    // Empty ISR is sufficient if ADC triggering is handled in hardware.
+}
 
 
 void pulse_pin(uint8_t pin) {
@@ -108,6 +115,14 @@ void ADC_init() {
 void timer_init() {
   // Need to setup Timer/Counter0 Compare Match A for ADC auto trigger
   // Compare match should trigger every ~17ms (60Hz)
+  // CTC Mode
+  TCCR0A |= (1 << WGM01);
+
+  TCCR0B |= (1 << CS02);
+
+  OCR0A = 64;
+
+  TIMSK0 |= (1 << OCIE0A);
 }
 
 
