@@ -83,17 +83,36 @@ void init_GPIO() {
   // Enable pull-up resistors for push buttons
   PORTA |= (1 << BTNB);
   PORTB |= (1 << BTNA);
+
+  // Set OE initial state to LOW
+  PORTA &= ~(1 << OE);
 }
 
 
-// Use ADC 6 on PA6 (pin 7)
-void ADC_init() {}
+void ADC_init() {
+  // REFS1:0 set to 0 for VCC to be used as ADC reference
+  // MUX5:0 = 000110 for ADC6 on PA6
+  ADMUX = (1 << MUX2) | (1 << MUX1);
+
+  // enable, auto trigger enable, interrupt enable, prescaler = 8 (adc clock = 125KHz, 1 sample = 104us)
+  ADCSRA |= (1 << ADEN) | (1 << ADATE) | (1 << ADIE) | (1 << ADPS1) | (1 << ADPS0);
+
+  // auto trigger source = Timer/Counter0 Compare Match A
+  ADCSRB |= (1 << ADTS1) | (1 << ADTS0);
+
+  // disable digital input buffer on ADC pin 6 to reduce poweer consumption
+  DIDR0 |= (1 << ADC6D);
+}
 
 
-void timer_init() {}
+void timer_init() {
+  // Need to setup Timer/Counter0 Compare Match A for ADC auto trigger
+  // Compare match should trigger every ~17ms (60Hz)
+}
 
 
 void update_LEDs() {
+  // Can we represent LED_STATES as an array of bytes to save RAM and minimize clock cycles?
   for (uint8_t i = 12; i >= 0; i--) {
     if (((LED_STATES << i) & 1)) {
       PORTA |= (1 << SDI);
@@ -103,6 +122,7 @@ void update_LEDs() {
     pulse_pin(CLK);
   }
   pulse_pin(LE);
+  return;
 }
 
 
