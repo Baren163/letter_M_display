@@ -48,15 +48,21 @@
 
 volatile bool BTN_A_pressed = 0;
 volatile bool BTN_B_pressed = 0;
+volatile bool POT_delay_flag = 0;
 
 uint8_t mode = 0;
 uint16_t LED_STATES = 0;  // 13 bit register to hold the boolean states of each of the LEDs
-uint8_t mode_0_1_LED_count = 1; // Variable
+uint8_t mode_0_LED_gap = 13;
+uint8_t mode_0_counter = 13;
 
 
-ISR(TIM0_COMPA_vect)
-{
-    // Empty ISR is sufficient if ADC triggering is handled in hardware.
+// ISR(TIM0_COMPA_vect) {
+//     // Empty ISR is sufficient if ADC triggering is handled in hardware
+//     __asm__("nop");
+// }
+
+ISR(TIM1_COMPA_vect) {
+  POT_delay_flag = true;
 }
 
 
@@ -96,40 +102,52 @@ void init_GPIO() {
 }
 
 
-void ADC_init() {
+void init_ADC() {
   // REFS1:0 set to 0 for VCC to be used as ADC reference
   // MUX5:0 = 000110 for ADC6 on PA6
   ADMUX = (1 << MUX2) | (1 << MUX1);
 
   // enable, auto trigger enable, interrupt enable, prescaler = 8 (adc clock = 125KHz, 1 sample = 104us)
-  ADCSRA |= (1 << ADEN) | (1 << ADATE) | (1 << ADIE) | (1 << ADPS1) | (1 << ADPS0);
+  ADCSRA = (1 << ADEN) | (1 << ADATE) | (1 << ADIE) | (1 << ADPS1) | (1 << ADPS0);
 
   // auto trigger source = Timer/Counter0 Compare Match A
-  ADCSRB |= (1 << ADTS1) | (1 << ADTS0);
+  ADCSRB = (1 << ADTS1) | (1 << ADTS0);
 
   // disable digital input buffer on ADC pin 6 to reduce poweer consumption
-  DIDR0 |= (1 << ADC6D);
+  DIDR0 = (1 << ADC6D);
 }
 
 
-void timer_init() {
+void init_timer0() {
   // Need to setup Timer/Counter0 Compare Match A for ADC auto trigger
   // Compare match should trigger every ~17ms (60Hz)
   // CTC Mode
-  TCCR0A |= (1 << WGM01);
+  TCCR0A = (1 << WGM01);
 
-  TCCR0B |= (1 << CS02);
+  TCCR0B = (1 << CS02);
 
   OCR0A = 64;
 
-  TIMSK0 |= (1 << OCIE0A);
+  TIMSK0 = (1 << OCIE0A);
+}
+
+
+void init_timer1() {
+  // CTC mode, prescaler 256
+  TCCR1B = (1 << WGM12) | (1 << CS12);
+
+  // Output compare 3096 is 1 second
+  OCR1AH = (3905 >> 8);
+  OCR1AL = (uint8_t)3905;
+
+  TIMSK1 = (1 << OCIE1A);
 }
 
 
 void update_LEDs() {
   // Can we represent LED_STATES as an array of bytes to save RAM and minimize clock cycles?
-  for (uint8_t i = 12; i >= 0; i--) {
-    if (((LED_STATES << i) & 1)) {
+  for (int8_t i = 12; i >= 0; i--) {
+    if (((LED_STATES >> i) & 1)) {
       PORTA |= (1 << SDI);
     } else {
       PORTA &= ~(1 << SDI);
@@ -144,32 +162,60 @@ void update_LEDs() {
 int main() {
 
   init_GPIO();
+  // init_ADC();
+  // init_timer0();
+  init_timer1();
+
+  sei();
 
   while(1) {
 
     // Button A cycles through the modes
     if (mode == 0) {
-      // Mode 0 is when the LEDs travel from left to right along the M
-      // Button B: number of LEDs 'on' at once
-      // Pot: speed of LEDs travelling along M
+        if (POT_delay_flag) {
+        // Mode 0 is when the LEDs travel from left to right along the M
+        // Button B: number of LEDs 'on' at once
+        // Pot: speed of LEDs travelling along M
 
-      if (BTN_B_pressed) {
-        BTN_B_pressed = 0;
-        if (mode_0_1_LED_count >= 13) {
-          mode_0_1_LED_count = 1;
-        } else {
-          mode_0_1_LED_count++;
+        POT_delay_flag = 0;
+
+        if (BTN_B_pressed) {
+          BTN_B_pressed = 0;
+          if (mode_0_LED_gap <= 1) {
+            mode_0_LED_gap = 13;
+          } else {
+            mode_0_LED_gap--;
+          }
         }
-      }
 
-      if (BTN_A_pressed) {
-        BTN_A_pressed = 0;
-        mode = 1;
-      }
+        if (BTN_A_pressed) {
+          BTN_A_pressed = 0;
+          mode = 1;
+        }
 
-      // Go through LED_STATES buffer and for each bit that is set, unset it and set the next one over.
-      
-      // Then based on mode_0_1_LED_count value, set the first LED or not
+        // Go through LED_STATES buffer and for each bit that is set, unset it and set the next one over
+        // for (int8_t i = 12; i >=; i--) {
+        //   if ((LED_STATES << i) & 1) {
+        //     LED_STATES &= ~(1 << i);
+        //     if (i != 12) {
+        //       LED_STATES |= (1 << (i+1));
+        //     }
+        //   }
+        // }
+        // Or just shift the buffer over by one
+        LED_STATES = LED_STATES >> 1;
+        
+        // Then based on mode_0_LED_gap value, set the first LED or not
+        mode_0_counter--;
+        if (mode_0_counter == 0) {
+          mode_0_counter = mode_0_LED_gap;
+          LED_STATES |= (1 << 12);
+        }
+
+        // Delay for a certain amount of time (delay duration based on potentiometer)
+        // For this delay we will use 16-bit timer 1
+
+      }
 
     } else if (mode == 1) {
       // Mode 1 is the same as Mode 0 but with the LEDs going the other direction (right to left)
