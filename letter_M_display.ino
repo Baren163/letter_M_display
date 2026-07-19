@@ -25,8 +25,8 @@
 
 //  --- Interface ---
 // Inputs:
-// - Button A,  Pin 5 (enable pull-up),  PB2
-// - Button B,  Pin 6 (enable pull-up),  PA7
+// - Button A,  Pin 5 (enable pull-up),  PB2, PCINT10
+// - Button B,  Pin 6 (enable pull-up),  PA7, PCINT7
 // - Pot,       Pin 7,                   PA6
 // Outputs:
 // - SDI,       Pin 13 (active low), PA0
@@ -72,15 +72,28 @@ ISR(ADC_vect) {
 
 
   // Read ADC value
-  ADC_val = (ADCH << 8) + (ADCL);
+  ADC_val = ADC;
 
-  // Map it to new OCR1A value
-  // Mapping (linear for now): 0 to 3.3v (0 to 1023) -> 200 to 4000
-  uint16_t output_comp_val = ((float)ADC_val * 3.714) + 200;
+  // // Map it to new OCR1A value
+  // // Mapping (linear for now): 0 to 3.3v (0 to 1023) -> 200 to 4000
+  // uint16_t output_comp_val = ((float)ADC_val * 3.714) + 200;
 
-  // Update OCR1A
-  OCR1AH = (output_comp_val >> 8);
-  OCR1AL = (uint8_t)output_comp_val;
+  // // Update OCR1A
+  // OCR1AH = (output_comp_val >> 8);
+  // OCR1AL = (uint8_t)output_comp_val;
+
+  // Map 0–1023 to 200–4000
+  uint16_t top = 200U + (uint16_t)(((uint32_t)ADC_val * 3800U) / 1023U);
+
+  OCR1A = top;
+}
+
+ISR(PCINT0_vect) {
+  // Pin change 0 interrupts (PCI0) will trigger if any enabled PCINT7..0 pin toggles (BTNB)
+}
+
+ISR(PCINT1_vect) {
+  // Pin change 1 interrupts (PCI1) will trigger if any enabled PCINT11..8 pin toggles (BTNA)
 }
 
 
@@ -90,13 +103,11 @@ void pulse_pin(uint8_t pin) {
       PORTA |= (1 << CLK);
       __asm__("nop");
       PORTA &= ~(1 << CLK);
-      PORTA ^= (1 << BTNB);
       break;
     case (LE):
       PORTA |= (1 << LE);
       __asm__("nop");
       PORTA &= ~(1 << LE);
-      
       break;
     case (OE):
       break;
@@ -128,7 +139,7 @@ void init_ADC() {
   ADMUX = (1 << MUX2) | (1 << MUX1);
 
   // enable, auto trigger enable, interrupt enable, prescaler = 8 (adc clock = 125KHz, 1 sample = 104us)
-  ADCSRA = (1 << ADEN) | (1 << ADATE) | (1 << ADIE) | (1 << ADPS1) | (1 << ADPS0);
+  ADCSRA = (1 << ADEN) | (1 << ADATE) | (1 << ADIE) | (1 << ADPS1) | (1 << ADPS0) | (1 << ADSC);
 
   // auto trigger source = Timer/Counter0 Compare Match A
   ADCSRB = (1 << ADTS1) | (1 << ADTS0);
@@ -148,7 +159,7 @@ void init_timer0() {
 
   OCR0A = 64;
 
-  TIMSK0 = (1 << OCIE0A);
+  TIMSK0 = (1 << OCIE0A); // you do not need to enable the Timer0 interrupt merely to generate an ADC hardware trigger, The ADC can detect the compare-match flag without executing a Timer0 ISR. Remove that line and remove the empty ISR
 }
 
 
