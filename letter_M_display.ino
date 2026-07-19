@@ -49,20 +49,38 @@
 volatile bool BTN_A_pressed = 0;
 volatile bool BTN_B_pressed = 0;
 volatile bool POT_delay_flag = 0;
+volatile uint16_t ADC_val = 0;
 
 uint8_t mode = 0;
 uint16_t LED_STATES = 3;  // 13 bit register to hold the boolean states of each of the LEDs
-uint8_t mode_0_LED_gap = 2;
-uint8_t mode_0_counter = 2;
+uint8_t mode_0_LED_gap = 6;
+uint8_t mode_0_counter = 6;
 
 
-// ISR(TIM0_COMPA_vect) {
-//     // Empty ISR is sufficient if ADC triggering is handled in hardware
-//     __asm__("nop");
-// }
+ISR(TIM0_COMPA_vect) {
+  // Empty ISR is sufficient if ADC triggering is handled in hardware
+}
 
-ISR(TIM1_COMPA_vect) {
+ISR(TIM1_OVF_vect) {
+  // For this timer I will look into using Fast PWM mode instead of CTC because CTC does not have double buffering
   POT_delay_flag = true;
+}
+
+ISR(ADC_vect) {
+  // When ADC conversion completes (every ~17ms), read ADC value, shift it right by 3 to lose 3 bits (3 decimals) of accuracy,
+  //compare with previous ADC value, if different ...
+
+
+  // Read ADC value
+  ADC_val = (ADCH << 8) + (ADCL);
+
+  // Map it to new OCR1A value
+  // Mapping (linear for now): 0 to 3.3v (0 to 1023) -> 200 to 4000
+  uint16_t output_comp_val = ((float)ADC_val * 3.714) + 200;
+
+  // Update OCR1A
+  OCR1AH = (output_comp_val >> 8);
+  OCR1AL = (uint8_t)output_comp_val;
 }
 
 
@@ -92,23 +110,20 @@ void pulse_pin(uint8_t pin) {
 void init_GPIO() {
   // Set inputs and outputs
   DDRA |= (1 << SDI) | (1 << CLK) | (1 << LE) | (1 << OE);
-  // DDRA &= ~(1 << BTNB) & ~(1 << DDA6);
-  // DDRB &= ~(1 << BTNA);
-  DDRA |= (1 << BTNB);  // For debugging I will use BTNB pin as output pin
+  DDRA &= ~(1 << BTNB) & ~(1 << DDA6);
+  DDRB &= ~(1 << BTNA);
 
   // Enable pull-up resistors for push buttons
-  // PORTA |= (1 << BTNB);
-  // PORTB |= (1 << BTNA);
+  PORTA |= (1 << BTNB);
+  PORTB |= (1 << BTNA);
 
   // Set OE initial state to LOW
   PORTA &= ~(1 << OE);
-
-  PORTA |= (1 << BTNB);
 }
 
 
 void init_ADC() {
-  // REFS1:0 set to 0 for VCC to be used as ADC reference
+  // REFS1:0 set to 0 for VCC to be used as ADC reference (3.3v)
   // MUX5:0 = 000110 for ADC6 on PA6
   ADMUX = (1 << MUX2) | (1 << MUX1);
 
@@ -138,14 +153,17 @@ void init_timer0() {
 
 
 void init_timer1() {
-  // CTC mode, prescaler 256
-  TCCR1B = (1 << WGM12) | (1 << CS12);
+  // Fast PWM mode uses double buffering for the OCR1A value and since we have no need for a PWM waveform we can use the
+  //OCR1A value as the TOP of the timer
 
-  // Output compare 3905 is 1 second
+  // 3906 = 1s
   OCR1AH = (600 >> 8);
   OCR1AL = (uint8_t)600;
 
-  TIMSK1 = (1 << OCIE1A);
+  // Fast PWM mode with OCR1A as TOP, instead of using Output Compare 1A interrupt I will use TOV1 interrupt, prescaler 256
+  TCCR1A = (1 << WGM11) | (1 << WGM10);
+  TCCR1B = (1 << WGM13) | (1 << WGM12) | (1 << CS12);
+  TIMSK1 = (1 << TOIE1);
 }
 
 
@@ -186,8 +204,8 @@ void update_LEDs() {
 int main() {
 
   init_GPIO();
-  // init_ADC();
-  // init_timer0();
+  init_ADC();
+  init_timer0();
   init_timer1();
 
   sei();
