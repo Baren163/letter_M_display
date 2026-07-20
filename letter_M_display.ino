@@ -47,9 +47,10 @@
 // Buttons (external)
 // Potentiometer (external)
 
-volatile bool BTN_A_pressed = 0;
-volatile bool BTN_B_pressed = 0;
-volatile bool POT_delay_flag = 0;
+volatile bool BTN_A_pressed = false;
+volatile bool BTN_B_pressed = false;
+volatile bool BTN_falling_edge_flag = false;
+volatile bool POT_delay_flag = false;
 volatile uint16_t ADC_val = 0;
 
 uint8_t mode = 0;
@@ -58,8 +59,26 @@ uint8_t mode_0_LED_gap = 6;
 uint8_t mode_0_counter = 6;
 
 
+// Need to implement software debouncing for buttons. Possible implementation can be when the interrupt occurs, wait 100ms and then read the state of the pin.
+// If its LOW then button has been pressed, else nothing. Now the problem is figuring out how to check button state 100ms after interrupt.
+// For this we can use timer0 interrupt which is currently being used for ADC as well. It executes every ~17ms
+
 ISR(TIM0_COMPA_vect) {
-  // Empty ISR is sufficient if ADC triggering is handled in hardware
+  // Empty ISR is sufficient if ADC triggering is handled in hardware. Runs every ~17ms
+  static uint8_t BTN_debounce_timer = 5;
+  if (BTN_falling_edge_flag) {
+    BTN_debounce_timer--;
+    if (BTN_debounce_timer == 0) {
+      BTN_debounce_timer = 7;
+      BTN_falling_edge_flag = false;
+      if (!(PINA & (1 << PINA7))) { // Only detect as pressed if button is still pressed ~100ms later, If button is pressed the pin will be 0
+        BTN_B_pressed = true;
+      }
+      if (!(PINB & (1 << PINB2))) {
+        BTN_A_pressed = true;
+      }
+    }
+  }
 }
 
 ISR(TIM1_OVF_vect) {
@@ -92,11 +111,11 @@ ISR(ADC_vect) {
 ISR(PCINT0_vect) {
   // Pin change 0 interrupts (PCI0) will trigger if any enabled PCINT7..0 pin toggles (BTNB)
 
-  // Only detect falling edge (button press)
+  // Only detect immediate falling edge (button press)
   if (PINA & (1 << PINA7)) {
     // Button was just released so do nothing
   } else {
-    BTN_B_pressed = true;
+    BTN_falling_edge_flag = true;
   }
 }
 
@@ -107,7 +126,7 @@ ISR(PCINT1_vect) {
   if (PINB & (1 << PINB2)) {
     // Button was just released so do nothing
   } else {
-    BTN_A_pressed = true;
+    BTN_falling_edge_flag = true;
   }
 }
 
@@ -254,7 +273,7 @@ int main() {
           POT_delay_flag = 0;
 
           if (BTN_B_pressed) {
-            BTN_B_pressed = 0;
+            BTN_B_pressed = false;
             if (mode_0_LED_gap <= MIN_LED_GAP) {
               mode_0_LED_gap = 13;
             } else {
@@ -263,7 +282,7 @@ int main() {
           }
 
           if (BTN_A_pressed) {
-            BTN_A_pressed = 0;
+            BTN_A_pressed = false;
             mode = 1;
           }
 
