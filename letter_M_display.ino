@@ -15,6 +15,7 @@
 #define OE 3
 #define BTNA 2
 #define BTNB 7
+#define MIN_LED_GAP 1
 
 // '''
 // Atomicity: While changing an int between 0 and 1 is safe on most 8-bit, 16-bit, and 32-bit microcontrollers,
@@ -52,7 +53,7 @@ volatile bool POT_delay_flag = 0;
 volatile uint16_t ADC_val = 0;
 
 uint8_t mode = 0;
-uint16_t LED_STATES = 3;  // 13 bit register to hold the boolean states of each of the LEDs
+uint16_t LED_STATES = 0;  // 13 bit register to hold the boolean states of each of the LEDs
 uint8_t mode_0_LED_gap = 6;
 uint8_t mode_0_counter = 6;
 
@@ -90,10 +91,24 @@ ISR(ADC_vect) {
 
 ISR(PCINT0_vect) {
   // Pin change 0 interrupts (PCI0) will trigger if any enabled PCINT7..0 pin toggles (BTNB)
+
+  // Only detect falling edge (button press)
+  if (PINA & (1 << PINA7)) {
+    // Button was just released so do nothing
+  } else {
+    BTN_B_pressed = true;
+  }
 }
 
 ISR(PCINT1_vect) {
   // Pin change 1 interrupts (PCI1) will trigger if any enabled PCINT11..8 pin toggles (BTNA)
+
+  // Only detect falling edge (button press)
+  if (PINB & (1 << PINB2)) {
+    // Button was just released so do nothing
+  } else {
+    BTN_A_pressed = true;
+  }
 }
 
 
@@ -130,6 +145,11 @@ void init_GPIO() {
 
   // Set OE initial state to LOW
   PORTA &= ~(1 << OE);
+
+  // Enable GPIO pin interrupts
+  GIMSK = (1 << PCIE1) | (1 << PCIE0);
+  PCMSK1 = (1 << PCINT10);
+  PCMSK0 = (1 << PCINT7);
 }
 
 
@@ -224,64 +244,148 @@ int main() {
   while(1) {
 
     // Button A cycles through the modes
-    if (mode == 0) {
+    switch (mode) {
+      case (0):
         if (POT_delay_flag) {
-        // Mode 0 is when the LEDs travel from left to right along the M
-        // Button B: number of LEDs 'on' at once
-        // Pot: speed of LEDs travelling along M
+          // Mode 0 is when the LEDs travel from left to right along the M
+          // Button B: number of LEDs 'on' at once
+          // Pot: speed of LEDs travelling along M
 
-        POT_delay_flag = 0;
+          POT_delay_flag = 0;
 
-        if (BTN_B_pressed) {
-          BTN_B_pressed = 0;
-          if (mode_0_LED_gap <= 1) {
-            mode_0_LED_gap = 13;
-          } else {
-            mode_0_LED_gap--;
+          if (BTN_B_pressed) {
+            BTN_B_pressed = 0;
+            if (mode_0_LED_gap <= MIN_LED_GAP) {
+              mode_0_LED_gap = 13;
+            } else {
+              mode_0_LED_gap--;
+            }
           }
+
+          if (BTN_A_pressed) {
+            BTN_A_pressed = 0;
+            mode = 1;
+          }
+
+          // Go through LED_STATES buffer and for each bit that is set, unset it and set the next one over
+          // for (int8_t i = 12; i >=; i--) {
+          //   if ((LED_STATES << i) & 1) {
+          //     LED_STATES &= ~(1 << i);
+          //     if (i != 12) {
+          //       LED_STATES |= (1 << (i+1));
+          //     }
+          //   }
+          // }
+          // Or just shift the buffer over by one
+          LED_STATES = LED_STATES >> 1;
+          
+          // Then based on mode_0_LED_gap value, set the first LED or not
+          mode_0_counter--;
+          if (mode_0_counter == 0) {
+            mode_0_counter = mode_0_LED_gap;
+            LED_STATES |= (1 << 13);
+          }
+
+          update_LEDs();
+
+          // Delay for a certain amount of time (delay duration based on potentiometer)
+          // For this delay we will use 16-bit timer 1
         }
+        break;
 
-        if (BTN_A_pressed) {
-          BTN_A_pressed = 0;
-          mode = 1;
+      case (1):
+        // Mode 1 is the same as Mode 0 but with the LEDs going the other direction (right to left)
+        if (POT_delay_flag) {
+          // Mode 0 is when the LEDs travel from left to right along the M
+          // Button B: number of LEDs 'on' at once
+          // Pot: speed of LEDs travelling along M
+
+          POT_delay_flag = 0;
+
+          if (BTN_B_pressed) {
+            BTN_B_pressed = 0;
+            if (mode_0_LED_gap <= MIN_LED_GAP) {
+              mode_0_LED_gap = 13;
+            } else {
+              mode_0_LED_gap--;
+            }
+          }
+
+          if (BTN_A_pressed) {
+            BTN_A_pressed = 0;
+            mode = 2;
+          }
+
+          // Go through LED_STATES buffer and for each bit that is set, unset it and set the next one over
+          // for (int8_t i = 12; i >=; i--) {
+          //   if ((LED_STATES << i) & 1) {
+          //     LED_STATES &= ~(1 << i);
+          //     if (i != 12) {
+          //       LED_STATES |= (1 << (i+1));
+          //     }
+          //   }
+          // }
+          // Or just shift the buffer over by one
+          LED_STATES = LED_STATES << 1;
+          
+          // Then based on mode_0_LED_gap value, set the first LED or not
+          mode_0_counter--;
+          if (mode_0_counter == 0) {
+            mode_0_counter = mode_0_LED_gap;
+            LED_STATES |= (1);
+          }
+
+          update_LEDs();
+
+          // Delay for a certain amount of time (delay duration based on potentiometer)
+          // For this delay we will use 16-bit timer 1
         }
+        break;
 
-        // Go through LED_STATES buffer and for each bit that is set, unset it and set the next one over
-        // for (int8_t i = 12; i >=; i--) {
-        //   if ((LED_STATES << i) & 1) {
-        //     LED_STATES &= ~(1 << i);
-        //     if (i != 12) {
-        //       LED_STATES |= (1 << (i+1));
-        //     }
-        //   }
-        // }
-        // Or just shift the buffer over by one
-        LED_STATES = LED_STATES >> 1;
-        
-        // Then based on mode_0_LED_gap value, set the first LED or not
-        mode_0_counter--;
-        if (mode_0_counter == 0) {
-          mode_0_counter = mode_0_LED_gap;
-          LED_STATES |= (1 << 12);
+      case (2):
+        // Mode 2 has manual LED sending with BTN_B and POT controls the speed it moves along
+        if (POT_delay_flag) {
+
+          POT_delay_flag = 0;
+
+          if (BTN_B_pressed) {
+            BTN_B_pressed = 0;
+            LED_STATES |= (1 << 13);
+          }
+
+          if (BTN_A_pressed) {
+            BTN_A_pressed = 0;
+            mode = 0;
+          }
+
+          // Go through LED_STATES buffer and for each bit that is set, unset it and set the next one over
+          // for (int8_t i = 12; i >=; i--) {
+          //   if ((LED_STATES << i) & 1) {
+          //     LED_STATES &= ~(1 << i);
+          //     if (i != 12) {
+          //       LED_STATES |= (1 << (i+1));
+          //     }
+          //   }
+          // }
+          // Or just shift the buffer over by one
+          LED_STATES = LED_STATES >> 1;
+
+
+          update_LEDs();
+
+          // Delay for a certain amount of time (delay duration based on potentiometer)
+          // For this delay we will use 16-bit timer 1
         }
+        break;
 
-        update_LEDs();
+      case (3):
+        // Mode 3 has the LED chain behaving as a shift register
+        // Button B: shift LEDs over by one
+        // Pot: shift in 1 or 0
 
-        // Delay for a certain amount of time (delay duration based on potentiometer)
-        // For this delay we will use 16-bit timer 1
+      default:
+        break;
 
-      }
-
-    } else if (mode == 1) {
-      // Mode 1 is the same as Mode 0 but with the LEDs going the other direction (right to left)
-
-    } else if (mode == 2) {
-      // Mode 2 has the LED chain behaving as a shift register
-      // Button B: shift LEDs over by one
-      // Pot: shift in 1 or 0
-
-    } else if (mode == 3) {
-      // Mode 3
     }
 
 
